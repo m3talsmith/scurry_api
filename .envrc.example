@@ -1,0 +1,9 @@
+export DATABASE_USERNAME="<example>"
+export DATABASE_PASSWORD="<example>"
+export DATABASE_HOST="<example>"
+export DATABASE_PORT="<example>"
+export DATABASE_NAME="<example>"
+export DATABASE_URL="postgres://${DATABASE_USERNAME}:${DATABASE_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}"
+
+# For example, the result of: openssl rand -base64 14
+export JWT_SECRET="<example>"
