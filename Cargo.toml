@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.70"
+chrono = "0.4.24"
 jsonwebtoken = "8.3.0"
 rocket = {version = "=0.5.0-rc.3", features = ["json", "msgpack", "uuid"]}
 sha2 = "0.10.6"

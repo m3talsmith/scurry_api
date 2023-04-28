@@ -8,6 +8,8 @@ use rocket::{State, http::Status};
 use sqlx::{Pool, Postgres};
 use sqlx::postgres::PgPoolOptions;
 
+mod api;
+
 #[get("/<id>")]
 fn hello(pool: &State<Pool<Postgres>>, id: String) -> Result<String, Status> {
     match id {
@@ -28,7 +30,9 @@ async fn main() -> anyhow::Result<()> {
         .connect(&*database_url.unwrap()).await?;
     rocket::build()
         .mount("/", routes![hello, hello_world])
+        .mount("/api", routes![api::auth::authenticate, api::auth::register])
         .manage(pool)
+        .attach(api::cors)
         .launch().await?;
     Ok(())
 }
