@@ -1,12 +1,11 @@
-use uuid::Timestamp;
-use rocket::log::private::log;
-use rocket::serde::json::{json, Json, Value};
+use rocket::serde::json::{json, Json, serde_json, Value};
 use rocket::serde::{Deserialize, Serialize};
-use rocket::{log, State};
+use rocket::State;
 
 use sha2::{Digest, Sha512};
 
 use crate::api::jwt::Token;
+use crate::api::state;
 use crate::api::user::{self, User};
 
 #[derive(Debug)]
@@ -30,44 +29,54 @@ impl Auth {
 
         format!("{:x}", hp)
     }
-    async fn authenticate(&self, db: &DatabaseConnection) -> Option<user::User> {
+    async fn authenticate(&self, supa: &state::Supabase) -> Option<User> {
         let hp = self.hashed_password();
-        let user = sqlx::query!(
-            "select * from users where name = ? and password = ?",
-            self.name, hp
-        )
-            .fetch_one(db)
-            .await?;
-        match user
-        {
-            Ok(user) => user,
-            Err(err) => {
-                println!("error authenticating: {}", err);
-                None
-            }
+        let resp = supa.client
+            .from("users")
+            .select("*")
+            .eq("name", self.name.clone())
+            .eq("password", hp)
+            .execute()
+            .await
+            .ok()?;
+        match resp.text().await {
+            Ok(data) => {
+                match serde_json::from_str(data.as_str()) {
+                    Ok(u) => Some(u),
+                    Err(_) => None
+                }
+            },
+            Err(_) => None
         }
     }
-    async fn register(&self, db: &DatabaseConnection) -> Result<user::User, AuthError> {
+    async fn register(&self, supa: &state::Supabase) -> Result<User, AuthError> {
         let hp = self.hashed_password();
-        match sqlx::query!(
-            "select * from users where name = ?",
-            self.name
-        ).fetch_one(db).await? {
+        let resp = supa.client
+            .from("users")
+            .select("*")
+            .eq("name", self.name.clone())
+            .limit(1)
+            .execute()
+            .await;
+        match resp {
             Ok(user) => {
                 println!("user found: {:?}", user);
                 return Err(AuthError::DuplicateRegistration);
             }
             Err(_) => {}
         };
-        let user = user::User {
+        let user = User {
             uid: uuid::Uuid::new_v4(),
             name: self.name.clone(),
             password: hp,
-            created_at: Timestamp::now(()),
         };
-        
-        match User::insert(user.clone()).exec(db).await {
-            Ok(_) => Ok(user.try_into_model().unwrap()),
+        let resp = supa.client
+            .from("users")
+            .insert(user.clone().into_json())
+            .execute()
+            .await;
+        match resp {
+            Ok(_) => Ok(user),
             Err(err) => {
                 println!("err: {:?}", err);
                 Err(AuthError::Unknown)
@@ -94,13 +103,13 @@ struct Response {
 }
 
 impl Response {
-    fn success(message: String, token: Token, user: user::Model) -> Self {
+    fn success(message: String, token: Token, user: User) -> Self {
         let status = AuthStatus::Success;
         let expires = Some(token.clone().claims().unwrap().exp);
         let token = Some(token.clone());
         let user = Some(user::Response {
             uid: user.uid,
-            name: user.email,
+            name: user.name,
         });
         Response {
             status,
@@ -127,8 +136,8 @@ impl Response {
 }
 
 #[post("/authenticate", format = "application/json", data = "<auth>")]
-pub async fn authenticate<'a>(db: &State<DatabaseConnection>, auth: Json<Auth>) -> Value {
-    match auth.authenticate(db).await {
+pub async fn authenticate<'a>(client: &State<state::Supabase>, auth: Json<Auth>) -> Value {
+    match auth.authenticate(client.inner()).await {
         Some(user) => match Token::new(user.uid) {
             Some(token) => json!(Response::success(
                 "you are now logged in".to_owned(),
@@ -142,8 +151,8 @@ pub async fn authenticate<'a>(db: &State<DatabaseConnection>, auth: Json<Auth>) 
 }
 
 #[post("/register", format = "application/json", data = "<auth>")]
-pub async fn register<'a>(db: &State<DatabaseConnection>, auth: Json<Auth>) -> Value {
-    match auth.register(db).await {
+pub async fn register<'a>(client: &State<state::Supabase>, auth: Json<Auth>) -> Value {
+    match auth.register(client.inner()).await {
         Ok(user) => match Token::new(user.uid) {
             Some(token) => json!(Response::success(
                 "you are now registered and logged in".to_owned(),

@@ -3,20 +3,12 @@ extern crate rocket;
 
 use std::env;
 
-use rocket::{State, http::Status};
-
-use sqlx::{Pool, Postgres};
-use sqlx::postgres::PgPoolOptions;
+use postgrest::Postgrest;
 
 mod api;
 
 #[get("/<id>")]
-fn hello(pool: &State<Pool<Postgres>>, id: String) -> Result<String, Status> {
-    match id {
-        name => Ok(format!("Hello, {}!", name)),
-        _ => Err(Status::NotFound)
-    }
-}
+fn hello(id: String) -> String { format!("Hello, {}!", id) }
 
 #[get("/")]
 fn hello_world() -> String {
@@ -25,14 +17,14 @@ fn hello_world() -> String {
 
 #[rocket::main]
 async fn main() -> anyhow::Result<()> {
-    let database_url = env::var("DATABASE_URL");
-    let pool = PgPoolOptions::new()
-        .connect(&*database_url.unwrap()).await?;
+    let api_url = env::var("SUPABASE_API_URL").unwrap();
+    let api_key = env::var("SUPABASE_API_KEY").unwrap();
+    let client = Postgrest::new(api_url.clone()).insert_header("apiKey", api_key.clone());
     rocket::build()
         .mount("/", routes![hello, hello_world])
         .mount("/api", routes![api::auth::authenticate, api::auth::register])
-        .manage(pool)
-        .attach(api::cors)
+        .manage(api::state::Supabase{api_url, api_key, client})
+        .attach(api::cors::Cors)
         .launch().await?;
     Ok(())
 }
